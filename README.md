@@ -24,7 +24,7 @@ NCS patch files are cumulative. The newest copy of each file holds the whole tab
 py build.py [--game "D:/Games/SteamLibrary/steamapps/common/Borderlands 4"] [--threshold 0.99]
 ```
 
-The output is `dist/pakchunk99-Windows_999_P.pak`.
+The output is `dist/AmmoCash_999_P.pak`.
 
 `tools/` must contain these files (they are not in the repo):
 
@@ -34,7 +34,7 @@ The output is `dist/pakchunk99-Windows_999_P.pak`.
 
 ## Install
 
-Download `pakchunk99-Windows_999_P.pak` from [Releases](https://github.com/GlcrTE/AmmoCash/releases), or build it yourself. Copy it to `Borderlands 4/OakGame/Content/Paks/`. If it does not load there, try `Paks/~mods/`.
+Download `AmmoCash_999_P.pak` from [Releases](https://github.com/GlcrTE/AmmoCash/releases), or build it yourself. Copy it to `Borderlands 4/OakGame/Content/Paks/`. If it does not load there, try `Paks/~mods/`.
 
 ## Compatibility
 

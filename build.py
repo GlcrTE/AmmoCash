@@ -33,7 +33,7 @@ NCS_OUTPUT = TOOLS / "output"  # ncs_parser always writes next to its binary
 
 AES_KEY = "0x33A604DF49A07FFD4A4C919962161F5C35A134D37EFA98DB37A34F6450D7D386"
 DEFAULT_GAME = Path("D:/Games/SteamLibrary/steamapps/common/Borderlands 4")
-PAK_NAME = "pakchunk99-Windows_999_P.pak"
+PAK_NAME = "AmmoCash_999_P.pak"
 NCS_DIR = "Engine/Content/_NCS"
 
 POOL_NAME = "itempool_ammocash"
