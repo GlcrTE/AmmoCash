@@ -6,7 +6,7 @@ Pipeline:
   3. Patch the JSON:
        attribute0   + evaluator_ammocash_<type>_weight  (cash weight per ammo type, only when full)
        itempool0    + itempool_ammocash                  (picks the ammo type with vanilla weights)
-                    + itempool_ammocash_<type>           (ammo vs. cash, 50/50 only when that type is full)
+                    + itempool_ammocash_<type>           (ammo vs. cash, cash only when that type is full)
        loot_config* ammo sockets -> itempool_ammocash
   4. Encode JSON -> NCS and pack everything into an unencrypted .pak.
 
