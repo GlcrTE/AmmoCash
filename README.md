@@ -32,7 +32,7 @@ The output is `dist/pakchunk99-Windows_999_P.pak`.
 
 ## Install
 
-Copy `pakchunk99-Windows_999_P.pak` to `Borderlands 4/OakGame/Content/Paks/`. If it does not load there, try `Paks/~mods/`.
+Download `pakchunk99-Windows_999_P.pak` from [Releases](https://github.com/GlcrTE/AmmoCash/releases), or build it yourself. Copy it to `Borderlands 4/OakGame/Content/Paks/`. If it does not load there, try `Paks/~mods/`.
 
 ## Compatibility
 
