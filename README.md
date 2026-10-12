@@ -9,10 +9,12 @@ In vanilla, each ammo type's drop weight comes from an `OakAmmoWeightResolver` (
 The mod adds:
 
 - `attribute0`: `evaluator_ammocash_<type>_weight`. This copies the ammo resolver, but the weight is 0 below 99% fill and equals the ammo type's own above-threshold weight above it.
-- `itempool0`: `itempool_ammocash`, which pairs each ammo sub-pool with a `currency_money_singlestack` entry weighted by the matching cash resolver.
+- `itempool0`: a two-stage roll.
+  - `itempool_ammocash` picks the ammo type with the vanilla weights.
+  - `itempool_ammocash_<type>` then picks between that ammo and `currency_money_singlestack`. The cash weight is 0 unless the type is full, so the split is 50/50 only for full types. Each type pool keeps the vanilla game-stage gate of its ammo.
 - `loot_config0/4/6`: every socket that used `LootPreset_Ammo` (or `itempool_ammo`) now uses `itempool_ammocash`. That is 66 sockets.
 
-When a type is full, that type's share of the roll is split 50/50 between its ammo and cash.
+Ammo types you need drop exactly as often as in vanilla. Only the share of a full type is split between its ammo and cash.
 
 ## Build
 

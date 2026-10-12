@@ -5,7 +5,8 @@ Pipeline:
   2. Decode NCS -> JSON with ncs_parser.
   3. Patch the JSON:
        attribute0   + evaluator_ammocash_<type>_weight  (cash weight per ammo type, only when full)
-       itempool0    + itempool_ammocash                  (ammo types + mirrored cash entries)
+       itempool0    + itempool_ammocash                  (picks the ammo type with vanilla weights)
+                    + itempool_ammocash_<type>           (ammo vs. cash, 50/50 only when that type is full)
        loot_config* ammo sockets -> itempool_ammocash
   4. Encode JSON -> NCS and pack everything into an unencrypted .pak.
 
@@ -142,19 +143,40 @@ def pool_item(handle, weight_attribute):
     )
 
 
+def type_pool_name(sub_pool):
+    return sub_pool.replace("itempool_ammo_", f"{POOL_NAME}_")
+
+
 def patch_itempool(table):
+    """Two-stage roll so ammo you need drops exactly as in vanilla:
+    itempool_ammocash picks the ammo type with the vanilla weights, then
+    itempool_ammocash_<type> picks ammo vs. cash (50/50 only when that type is full)."""
     record, ammo = find_entry(table, "itempool_ammo")
     if ammo is None:
         sys.exit("itempool0: itempool_ammo not found")
     if find_entry(table, POOL_NAME)[1] is not None:
         return
-    items = []
+    op = ammo["__op"]
+    new_entries = []
+    outer_items = []
     for sub_pool, ammo_eval, cash_eval in AMMO_TYPES:
-        items.append(pool_item(f"itempool'{sub_pool}'", ammo_eval))
-        items.append(pool_item(CASH_ITEM, cash_eval))
-    new = {"__op": ammo["__op"], POOL_NAME: obj(itempool=s(POOL_NAME), items=arr(items))}
+        _, sub = find_entry(table, sub_pool)
+        if sub is None:
+            sys.exit(f"itempool0: {sub_pool} not found")
+        name = type_pool_name(sub_pool)
+        fields = {
+            "itempool": s(name),
+            "items": arr([pool_item(f"itempool'{sub_pool}'", ammo_eval), pool_item(CASH_ITEM, cash_eval)]),
+        }
+        # Same game-stage gate as the ammo sub-pool, so a locked type never rolls cash-only.
+        if "mingamestage" in sub[sub_pool]["value"]:
+            fields["mingamestage"] = copy.deepcopy(sub[sub_pool]["value"]["mingamestage"])
+        new_entries.append({"__op": op, name: obj(**fields)})
+        outer_items.append(pool_item(f"itempool'{name}'", ammo_eval))
+    new_entries.append({"__op": op, POOL_NAME: obj(itempool=s(POOL_NAME), items=arr(outer_items))})
     ents = record["entries"]
-    ents.insert(ents.index(ammo) + 1, new)
+    at = ents.index(ammo) + 1
+    ents[at:at] = new_entries
 
 
 def patch_loot_config(table):
@@ -245,7 +267,7 @@ def main():
     t = load(ATTRIBUTE); patch_attributes(t, args.threshold); save(ATTRIBUTE, t)
     add_key_strings(ATTRIBUTE, [m for _, _, m in AMMO_TYPES])
     t = load(ITEMPOOL); patch_itempool(t); save(ITEMPOOL, t)
-    add_key_strings(ITEMPOOL, [POOL_NAME])
+    add_key_strings(ITEMPOOL, [POOL_NAME] + [type_pool_name(p) for p, _, _ in AMMO_TYPES])
     patched = [ATTRIBUTE, ITEMPOOL]
     for n in LOOT_CONFIGS:
         if n not in sources:
@@ -273,7 +295,7 @@ def main():
     run([NCS_PARSER, ncs_dir], cwd=TOOLS)
     check = {
         f"Nexus-Data-{ATTRIBUTE}": [m for _, _, m in AMMO_TYPES],
-        f"Nexus-Data-{ITEMPOOL}": [POOL_NAME],
+        f"Nexus-Data-{ITEMPOOL}": [POOL_NAME] + [type_pool_name(p) for p, _, _ in AMMO_TYPES],
     }
     for n in patched[2:]:
         check[f"Nexus-Data-{n}"] = [f"itempool'{POOL_NAME}'"]
