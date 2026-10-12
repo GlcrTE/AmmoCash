@@ -1,6 +1,17 @@
 # AmmoCash (Borderlands 4)
 
-Ammo slots in chests, ammo crates, lockers, toolboxes and similar lootables drop **cash instead of ammo 50% of the time when that ammo type is full**. Ammo types that are not full drop as usual.
+Ammo slots in chests, ammo crates, lockers, toolboxes and similar lootables drop **cash instead of ammo when that ammo type is full**. Ammo types that are not full drop as usual.
+
+There are four versions, by how often a full type's ammo turns into cash:
+
+| Pak | Cash when the type is full |
+|---|---|
+| `AmmoCash25_999_P.pak` | 25% |
+| `AmmoCash50_999_P.pak` | 50% |
+| `AmmoCash75_999_P.pak` | 75% |
+| `AmmoCash100_999_P.pak` | 100% (weight 1,000,000 : 1, so effectively always) |
+
+Install only one of them.
 
 ## How it works
 
@@ -8,10 +19,10 @@ In vanilla, each ammo type's drop weight comes from an `OakAmmoWeightResolver` (
 
 The mod adds:
 
-- `attribute0`: `evaluator_ammocash_<type>_weight`. This copies the ammo resolver, but the weight is 0 below 99% fill and equals the ammo type's own above-threshold weight above it.
+- `attribute0`: `evaluator_ammocash_<type>_weight`. This is an `OakAmmoWeightResolver` for that ammo type. Its weight is 0 below 99% fill and `p / (1 - p)` above it, where `p` is the cash chance.
 - `itempool0`: a two-stage roll.
   - `itempool_ammocash` picks the ammo type with the vanilla weights.
-  - `itempool_ammocash_<type>` then picks between that ammo and `currency_money_singlestack`. The cash weight is 0 unless the type is full, so the split is 50/50 only for full types. Each type pool keeps the vanilla game-stage gate of its ammo.
+  - `itempool_ammocash_<type>` then picks between that ammo (weight 1) and `currency_money_singlestack` (the cash resolver). The cash weight is 0 unless the type is full. Each type pool keeps the vanilla game-stage gate of its ammo.
 - `loot_config0/4/6`: every socket that used `LootPreset_Ammo` (or `itempool_ammo`) now uses `itempool_ammocash`. That is 66 sockets.
 
 Ammo types you need drop exactly as often as in vanilla. Only the share of a full type is split between its ammo and cash.
@@ -21,10 +32,10 @@ Ammo types you need drop exactly as often as in vanilla. Only the share of a ful
 NCS patch files are cumulative. The newest copy of each file holds the whole table, so the mod ships full copies of these files with the patches applied. **After every game update, run the build again.**
 
 ```
-py build.py [--game "D:/Games/SteamLibrary/steamapps/common/Borderlands 4"] [--threshold 0.99]
+py build.py [--game "D:/Games/SteamLibrary/steamapps/common/Borderlands 4"] [--threshold 0.99] [--chance 50 | --all]
 ```
 
-The output is `dist/AmmoCash_999_P.pak`.
+`--chance` sets the cash percentage (default 50) and writes `dist/AmmoCash<chance>_999_P.pak`. `--all` builds the 25/50/75/100 versions.
 
 `tools/` must contain these files (they are not in the repo):
 
@@ -34,7 +45,7 @@ The output is `dist/AmmoCash_999_P.pak`.
 
 ## Install
 
-Download `AmmoCash_999_P.pak` from [Releases](https://github.com/GlcrTE/AmmoCash/releases), or build it yourself. Copy it to `Borderlands 4/OakGame/Content/Paks/`. If it does not load there, try `Paks/~mods/`.
+Download one `AmmoCash<chance>_999_P.pak` from [Releases](https://github.com/GlcrTE/AmmoCash/releases), or build it yourself. Remove any other AmmoCash pak first (including the older `AmmoCash_999_P.pak` or `pakchunk99-Windows_999_P.pak`). Copy it to `Borderlands 4/OakGame/Content/Paks/`. If it does not load there, try `Paks/~mods/`.
 
 ## Compatibility
 

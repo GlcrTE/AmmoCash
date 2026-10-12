@@ -1,4 +1,4 @@
-"""Build AmmoCash: chest ammo slots drop cash 50% of the time when that ammo type is full.
+"""Build AmmoCash: chest ammo slots drop cash instead of ammo (25/50/75/100%) when that ammo type is full.
 
 Pipeline:
   1. Find the newest copy of each needed NCS file in the game's paks (patch paks are cumulative).
@@ -10,7 +10,7 @@ Pipeline:
        loot_config* ammo sockets -> itempool_ammocash
   4. Encode JSON -> NCS and pack everything into an unencrypted .pak.
 
-Run from anywhere:  py build.py [--game "D:/.../Borderlands 4"] [--threshold 0.99]
+Run from anywhere:  py build.py [--game "D:/.../Borderlands 4"] [--threshold 0.99] [--chance 50 | --all]
 """
 
 import argparse
@@ -33,7 +33,7 @@ NCS_OUTPUT = TOOLS / "output"  # ncs_parser always writes next to its binary
 
 AES_KEY = "0x33A604DF49A07FFD4A4C919962161F5C35A134D37EFA98DB37A34F6450D7D386"
 DEFAULT_GAME = Path("D:/Games/SteamLibrary/steamapps/common/Borderlands 4")
-PAK_NAME = "AmmoCash_999_P.pak"
+CHANCES = [25, 50, 75, 100]  # --all builds one pak per cash chance (percent)
 NCS_DIR = "Engine/Content/_NCS"
 
 POOL_NAME = "itempool_ammocash"
@@ -115,7 +115,12 @@ def locate(paks_dir: Path, names):
 
 # --- Step 3: patches ---
 
-def patch_attributes(table, threshold):
+def cash_weight(chance):
+    """Cash weight next to an ammo weight of 1 that gives `chance` cash when the type is full."""
+    return 1_000_000.0 if chance >= 1 else chance / (1 - chance)
+
+
+def patch_attributes(table, threshold, chance):
     _, template_entry = find_entry(table, AMMO_TYPES[0][1])
     if template_entry is None:
         sys.exit("attribute0: ammo weight evaluators not found")
@@ -126,9 +131,10 @@ def patch_attributes(table, threshold):
         body = copy.deepcopy(src[src_name])
         body["value"]["attribute"] = s(mod_name)
         resolver = body["value"]["value"]["value"]
-        # Same above-threshold weight as the ammo itself -> 50/50 when full.
-        # Everything else is 0, so cash only competes once the type is (nearly) full.
+        # Cash weight is cash_weight(chance) above the threshold and 0 everywhere else,
+        # so cash only competes once the type is (nearly) full.
         resolver["threshold"] = obj(constant=s(f"{threshold:.6f}"))
+        resolver["abovethresholdweight"] = obj(constant=s(f"{cash_weight(chance):.6f}"))
         for field in ("noweight", "minbelowthresholdweight", "maxbelowthresholdweight"):
             resolver[field] = obj(constant=s("0.000000"))
         new = {"__op": src["__op"], mod_name: body}
@@ -143,6 +149,13 @@ def pool_item(handle, weight_attribute):
     )
 
 
+def constant_item(handle, weight):
+    return obj(
+        item=obj(item=obj(handle=s(handle))),
+        weight=obj(constant=s(f"{weight:.6f}")),
+    )
+
+
 def type_pool_name(sub_pool):
     return sub_pool.replace("itempool_ammo_", f"{POOL_NAME}_")
 
@@ -150,7 +163,7 @@ def type_pool_name(sub_pool):
 def patch_itempool(table):
     """Two-stage roll so ammo you need drops exactly as in vanilla:
     itempool_ammocash picks the ammo type with the vanilla weights, then
-    itempool_ammocash_<type> picks ammo vs. cash (50/50 only when that type is full)."""
+    itempool_ammocash_<type> picks ammo (weight 1) vs. cash (weight 0, or cash_weight() when full)."""
     record, ammo = find_entry(table, "itempool_ammo")
     if ammo is None:
         sys.exit("itempool0: itempool_ammo not found")
@@ -166,7 +179,7 @@ def patch_itempool(table):
         name = type_pool_name(sub_pool)
         fields = {
             "itempool": s(name),
-            "items": arr([pool_item(f"itempool'{sub_pool}'", ammo_eval), pool_item(CASH_ITEM, cash_eval)]),
+            "items": arr([constant_item(f"itempool'{sub_pool}'", 1.0), pool_item(CASH_ITEM, cash_eval)]),
         }
         # Same game-stage gate as the ammo sub-pool, so a locked type never rolls cash-only.
         if "mingamestage" in sub[sub_pool]["value"]:
@@ -213,20 +226,97 @@ def patch_loot_config(table):
 
 # --- main ---
 
+def pak_name(percent):
+    return f"AmmoCash{percent}_999_P.pak"
+
+
+def add_key_strings(meta, new_strings):
+    """New entry names must exist in the key string table (table 1) or the encoder refuses them."""
+    table = meta["stringTables"][1]
+    for name in new_strings:
+        if name not in table["strings"]:
+            table["strings"].append(name)
+    table["declaredCount"] = len(table["strings"])
+
+
+def build_pak(percent, threshold, json_dir, loot_configs):
+    """Patch the decoded tables in json_dir (left untouched) and pack them into dist/."""
+    work = WORK / f"build{percent}"
+    enc_dir, ncs_dir = work / "encode", work / "pak" / NCS_DIR
+    for d in (enc_dir, ncs_dir):
+        d.mkdir(parents=True)
+
+    def load(n):
+        return json.loads((json_dir / f"{n}.json").read_text(encoding="utf-8"))
+
+    def save(n, table, new_strings=()):
+        (enc_dir / f"{n}.json").write_text(json.dumps(table), encoding="utf-8")
+        meta = json.loads((json_dir / f"{n}_metadata.json").read_text(encoding="utf-8"))
+        add_key_strings(meta, new_strings)
+        (enc_dir / f"{n}_metadata.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
+
+    t = load(ATTRIBUTE); patch_attributes(t, threshold, percent / 100)
+    save(ATTRIBUTE, t, [m for _, _, m in AMMO_TYPES])
+    t = load(ITEMPOOL); patch_itempool(t)
+    save(ITEMPOOL, t, [POOL_NAME] + [type_pool_name(p) for p, _, _ in AMMO_TYPES])
+    patched = [ATTRIBUTE, ITEMPOOL]
+    for n in loot_configs:
+        t = load(n)
+        count = patch_loot_config(t)
+        print(f"  {n}: {count} ammo sockets redirected")
+        if count:
+            save(n, t)
+            patched.append(n)
+
+    # Encode
+    shutil.rmtree(NCS_OUTPUT, ignore_errors=True)
+    run([NCS_PARSER, enc_dir], cwd=TOOLS)
+    for n in patched:
+        shutil.copy(NCS_OUTPUT / "ncs" / f"{n}.ncs", ncs_dir / f"Nexus-Data-{n}.ncs")
+
+    # Verify: re-decode and check the new entries survived
+    shutil.rmtree(NCS_OUTPUT, ignore_errors=True)
+    run([NCS_PARSER, ncs_dir], cwd=TOOLS)
+    check = {
+        f"Nexus-Data-{ATTRIBUTE}": [m for _, _, m in AMMO_TYPES] + [f"{cash_weight(percent / 100):.6f}"],
+        f"Nexus-Data-{ITEMPOOL}": [POOL_NAME] + [type_pool_name(p) for p, _, _ in AMMO_TYPES],
+    }
+    for n in patched[2:]:
+        check[f"Nexus-Data-{n}"] = [f"itempool'{POOL_NAME}'"]
+    for n, needles in check.items():
+        text = (NCS_OUTPUT / "json" / f"{n}.json").read_text(encoding="utf-8")
+        for needle in needles:
+            if needle not in text:
+                sys.exit(f"verification failed: {needle} missing in {n}")
+    shutil.rmtree(NCS_OUTPUT, ignore_errors=True)
+
+    # Pack
+    DIST.mkdir(exist_ok=True)
+    out = DIST / pak_name(percent)
+    out.unlink(missing_ok=True)
+    run([REPAK, "pack", "--version", "V11", "--mount-point", "../../../", work / "pak", out])
+    print(f"  built {out}")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--game", type=Path, default=DEFAULT_GAME)
     ap.add_argument("--threshold", type=float, default=0.99,
                     help="ammo fill fraction above which cash can replace that ammo type")
+    ap.add_argument("--chance", type=int, default=50,
+                    help="percent of a full type's ammo drops that become cash (1-100)")
+    ap.add_argument("--all", action="store_true", help=f"build one pak for each of {CHANCES}")
     args = ap.parse_args()
+    if not 1 <= args.chance <= 100:
+        sys.exit("--chance must be between 1 and 100")
 
     paks_dir = args.game / "OakGame/Content/Paks"
     if not paks_dir.is_dir():
         sys.exit(f"Paks folder not found: {paks_dir}")
 
     shutil.rmtree(WORK, ignore_errors=True)
-    raw_dir, json_dir, ncs_dir = WORK / "raw", WORK / "json", WORK / "pak" / NCS_DIR
-    for d in (raw_dir, json_dir, ncs_dir):
+    raw_dir, json_dir = WORK / "raw", WORK / "json"
+    for d in (raw_dir, json_dir):
         d.mkdir(parents=True, exist_ok=True)
 
     names = [ATTRIBUTE, ITEMPOOL] + LOOT_CONFIGS
@@ -247,72 +337,11 @@ def main():
     for f in (NCS_OUTPUT / "json").glob("*.json"):
         shutil.copy(f, json_dir / f.name)
 
-    def load(n):
-        return json.loads((json_dir / f"{n}.json").read_text(encoding="utf-8"))
-
-    def save(n, table):
-        (json_dir / f"{n}.json").write_text(json.dumps(table), encoding="utf-8")
-
-    def add_key_strings(n, new_strings):
-        """New entry names must exist in the key string table (table 1) or the encoder refuses them."""
-        path = json_dir / f"{n}_metadata.json"
-        meta = json.loads(path.read_text(encoding="utf-8"))
-        table = meta["stringTables"][1]
-        for name in new_strings:
-            if name not in table["strings"]:
-                table["strings"].append(name)
-        table["declaredCount"] = len(table["strings"])
-        path.write_text(json.dumps(meta, indent=2), encoding="utf-8")
-
-    t = load(ATTRIBUTE); patch_attributes(t, args.threshold); save(ATTRIBUTE, t)
-    add_key_strings(ATTRIBUTE, [m for _, _, m in AMMO_TYPES])
-    t = load(ITEMPOOL); patch_itempool(t); save(ITEMPOOL, t)
-    add_key_strings(ITEMPOOL, [POOL_NAME] + [type_pool_name(p) for p, _, _ in AMMO_TYPES])
-    patched = [ATTRIBUTE, ITEMPOOL]
-    for n in LOOT_CONFIGS:
-        if n not in sources:
-            continue
-        t = load(n)
-        count = patch_loot_config(t)
-        print(f"{n}: {count} ammo sockets redirected")
-        if count:
-            save(n, t)
-            patched.append(n)
-
-    # Encode only the patched tables
-    enc_dir = WORK / "encode"
-    enc_dir.mkdir()
-    for n in patched:
-        shutil.copy(json_dir / f"{n}.json", enc_dir)
-        shutil.copy(json_dir / f"{n}_metadata.json", enc_dir)
-    shutil.rmtree(NCS_OUTPUT, ignore_errors=True)
-    run([NCS_PARSER, enc_dir], cwd=TOOLS)
-    for n in patched:
-        shutil.copy(NCS_OUTPUT / "ncs" / f"{n}.ncs", ncs_dir / f"Nexus-Data-{n}.ncs")
-
-    # Verify: re-decode and check the new entries survived
-    shutil.rmtree(NCS_OUTPUT, ignore_errors=True)
-    run([NCS_PARSER, ncs_dir], cwd=TOOLS)
-    check = {
-        f"Nexus-Data-{ATTRIBUTE}": [m for _, _, m in AMMO_TYPES],
-        f"Nexus-Data-{ITEMPOOL}": [POOL_NAME] + [type_pool_name(p) for p, _, _ in AMMO_TYPES],
-    }
-    for n in patched[2:]:
-        check[f"Nexus-Data-{n}"] = [f"itempool'{POOL_NAME}'"]
-    for n, needles in check.items():
-        text = (NCS_OUTPUT / "json" / f"{n}.json").read_text(encoding="utf-8")
-        for needle in needles:
-            if needle not in text:
-                sys.exit(f"verification failed: {needle} missing in {n}")
-    shutil.rmtree(NCS_OUTPUT, ignore_errors=True)
+    loot_configs = [n for n in LOOT_CONFIGS if n in sources]
+    for percent in (CHANCES if args.all else [args.chance]):
+        print(f"{percent}% cash:")
+        build_pak(percent, args.threshold, json_dir, loot_configs)
     print("verification ok")
-
-    # Pack
-    DIST.mkdir(exist_ok=True)
-    out = DIST / PAK_NAME
-    out.unlink(missing_ok=True)
-    run([REPAK, "pack", "--version", "V11", "--mount-point", "../../../", WORK / "pak", out])
-    print(f"built {out}")
 
 
 if __name__ == "__main__":
