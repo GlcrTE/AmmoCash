@@ -1,0 +1,6 @@
+work/
+dist/
+tools/output/
+tools/*.exe
+tools/*.dll
+__pycache__/
